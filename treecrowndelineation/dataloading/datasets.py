@@ -5,6 +5,7 @@ import multiprocessing as mp
 from torch.utils.data import IterableDataset, get_worker_info
 from ..modules.indices import ndvi
 from ..modules.utils import read_img
+import rioxarray
 
 
 class InMemoryRSDataset:
@@ -31,10 +32,13 @@ class InMemoryRSDataset:
             if len(m) != len(raster_files):
                 raise RuntimeError("The length of the given lists must be equal.")
             for j, r in enumerate(raster_files):
-                raster_file_index = r.split('.')[-2].split('_')[-1]
-                mask_file_index = m[j].split('.')[-2].split('_')[-1]
-                if raster_file_index != mask_file_index:
-                    raise RuntimeError("The raster and mask lists must be sorted equally.")
+                if isinstance(r, np.ndarray):
+                    pass  # 跳过文件名匹配
+                else:
+                    raster_file_index = r.split('.')[-2].split('_')[-1]
+                    mask_file_index = m[j].split('.')[-2].split('_')[-1]
+                    if raster_file_index != mask_file_index:
+                        raise RuntimeError("The raster and mask lists must be sorted equally.")
 
         self.raster_files = raster_files
         self.mask_files = mask_files
@@ -67,7 +71,15 @@ class InMemoryRSDataset:
             file (str): file to load
             used_bands (list): bands to use, indexing starts from 0, default 'None' loads all bands
         """
-        arr = xr.open_rasterio(file).load().astype(self.dtype)  # eagerly load the image from disk via_load
+        # arr = xr.open_rasterio(file).load().astype(self.dtype)  # eagerly load the image from disk via_load
+        if isinstance(file, np.ndarray):
+            arr = file.astype(self.dtype)
+        if self.dim_ordering == "HWC":
+            arr = arr.transpose(1, 2, 0)
+            self.rasters.append(arr)
+            return
+        
+        arr = rioxarray.open_rasterio(file).load().astype(self.dtype)
         arr.close()  # dont know if needed, but to be sure...
 
 
@@ -92,7 +104,7 @@ class InMemoryRSDataset:
 
     def load_mask(self, file: str):
         """Loads a mask from disk."""
-        arr = xr.open_rasterio(file).load().astype(self.dtype)  # eagerly load the image from disk via load
+        arr = rioxarray.open_rasterio(file).load().astype(self.dtype)  # eagerly load the image from disk via load
         arr.close()  # dont know if needed, but to be sure...
 
         num_bands = arr.shape[0]
@@ -283,7 +295,7 @@ class RSTorchDataset(RSDataset, IterableDataset):
         # go through all rasters, check shape, sum up, divide by cutout size
         total_size = 0
         for r in self.rasters:
-            arr = xr.open_rasterio(r)
+            arr = rioxarray.open_rasterio(r)
             total_size += np.prod(np.array(arr.shape)[1:])
             arr.close()
         return total_size // np.prod(self.cutout_size)

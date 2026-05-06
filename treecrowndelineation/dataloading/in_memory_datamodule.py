@@ -8,6 +8,35 @@ from ..dataloading import datasets as ds
 from ..modules.utils import dilate_img
 
 
+
+from types import SimpleNamespace
+import rasterio
+
+# 1. Define a class that pretends to be sortable
+class SortableNamespace(SimpleNamespace):
+    def __lt__(self, other):
+        # This "trick" allows np.sort() to work.
+        # It just compares the objects' memory addresses.
+        return id(self) < id(other)
+
+# 2. Update the loader to use this new class
+def load_files(paths):
+    """Loads tif files into SortableNamespace objects."""
+    loaded = []
+    for p in paths:
+        with rasterio.open(p) as src:
+            arr = src.read()             # Shape: (C, H, W)
+            arr = np.transpose(arr, (1, 2, 0)) # Shape: (H, W, C)
+        
+        # CHANGED: Use SortableNamespace instead of SimpleNamespace
+        loaded.append(SortableNamespace(data=arr))
+        
+    return loaded
+
+
+
+
+
 class InMemoryDataModule(pl.LightningDataModule):
     def __init__(self,
                  rasters: str or list,
@@ -76,10 +105,11 @@ class InMemoryDataModule(pl.LightningDataModule):
         else:
             self.rasters = np.sort(glob.glob(os.path.abspath(rasters) + "/*.tif"))
 
-        if type(targets[0]) in (list, tuple, np.ndarray):
-            self.targets = [np.sort(file_list) for file_list in targets]
-        else:
-            self.targets = [np.sort(glob.glob(os.path.abspath(file_list) + "/*.tif")) for file_list in targets]
+    #    if type(targets[0]) in (list, tuple, np.ndarray):
+    #        self.targets = [np.sort(file_list) for file_list in targets]
+    #    else:
+    #        self.targets = [np.sort(glob.glob(os.path.abspath(file_list) + "/*.tif")) for file_list in targets]
+
 
         self.training_split = training_split
         self.batch_size = batchsize
